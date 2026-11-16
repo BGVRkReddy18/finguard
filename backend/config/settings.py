@@ -66,8 +66,25 @@ TEMPLATES = [
     }
 ]
 
-# PostgreSQL when POSTGRES_HOST is set (Docker / prod); SQLite otherwise (fast local tests)
-if os.environ.get("POSTGRES_HOST"):
+# Database: a single URL (hosted Postgres such as Neon), POSTGRES_* vars (Docker / prod), or SQLite (tests)
+if os.environ.get("DJANGO_DATABASE_URL"):
+    from urllib.parse import parse_qsl, unquote, urlparse
+
+    _db = urlparse(os.environ["DJANGO_DATABASE_URL"])
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": _db.hostname,
+            "PORT": str(_db.port or 5432),
+            "NAME": _db.path.lstrip("/"),
+            "USER": unquote(_db.username or ""),
+            "PASSWORD": unquote(_db.password or ""),
+            # 0 = close after each request, so a serverless database can scale to zero when idle
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+            "OPTIONS": dict(parse_qsl(_db.query)),  # e.g. sslmode=require
+        }
+    }
+elif os.environ.get("POSTGRES_HOST"):
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",

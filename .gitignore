@@ -12,3 +12,4 @@ data/*
 !data/.gitkeep
 mlruns/
 .env.prod
+.env.lite

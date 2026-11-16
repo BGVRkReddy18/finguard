@@ -55,3 +55,18 @@ def test_prune_keeps_flagged_and_recent(make_event):
     assert Transaction.objects.count() == 2
     assert Transaction.objects.filter(is_flagged=True).count() == 1
     assert FraudCase.objects.count() == 1
+
+
+def test_database_url_parsing(monkeypatch):
+    import importlib
+
+    import config.settings as settings_module
+
+    monkeypatch.setenv("DJANGO_DATABASE_URL", "postgresql://u%40x:p%2Fw@db.example.neon.tech:5433/neondb?sslmode=require")
+    reloaded = importlib.reload(settings_module)
+    db = reloaded.DATABASES["default"]
+    parsed = (db["HOST"], db["PORT"], db["NAME"], db["USER"], db["PASSWORD"])
+    assert parsed == ("db.example.neon.tech", "5433", "neondb", "u@x", "p/w")
+    assert db["OPTIONS"] == {"sslmode": "require"} and db["CONN_MAX_AGE"] == 0
+    monkeypatch.delenv("DJANGO_DATABASE_URL")
+    importlib.reload(settings_module)

@@ -14,7 +14,7 @@ ignore = [
 
 [lint.isort]
 # Each service is its own import root
-known-first-party = ["app", "training", "config", "accounts", "cases", "transactions", "generator"]
+known-first-party = ["app", "training", "config", "accounts", "cases", "transactions", "generator", "aiapp", "mlapp"]
 
 [lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106", "S107"]  # test passwords / tokens

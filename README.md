@@ -2,9 +2,6 @@
 
 [![CI](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml/badge.svg)](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml)
 
-**Live demo: [gvrkrishnareddybommareddy-finguard.hf.space](https://gvrkrishnareddybommareddy-finguard.hf.space)** — sign in as `analyst` / `finguard123`
-or `manager` / `finguard123`. (Hosted free on Hugging Face Spaces; data is simulated.)
-
 FinGuard scores card transactions for fraud in real time as they stream through Kafka, explains every
 decision, and routes suspicious ones to a case-management workflow for fraud analysts — with a full
 audit trail, the way banks require.
@@ -152,8 +149,16 @@ run on a MacBook Air (8 cores) alongside ~13 other containers, so treat as a low
 Saturation latency is mostly queueing (Little's law: 64 / 1,217 req/s ≈ 52 ms ≈ measured p50); the
 steady-load row is the operating latency. Workers scale throughput because all state lives in Redis.
 
-**Two deployment targets** (guide in [DEPLOY.md](DEPLOY.md)):
-- **Hugging Face Spaces (live demo, free, no card):** the whole platform in one container
+**Deployment targets** (guide in [DEPLOY.md](DEPLOY.md)):
+- **Cloud Lite (live demo; free, no card): Vercel + Render + Neon.** The same application code in one
+  ASGI process (`deploy/lite/server.py`): Django at `/`, the AI FastAPI app at `/ai`, ML endpoints at
+  `/ml`; Kafka → in-process asyncio queues, Redis → in-memory feature store. Runs in **~120 MB** on
+  Render's free 0.1-CPU instance. **Cost-aware:** transactions stream only while someone has the
+  dashboard open; when idle the app pauses the simulator and closes every DB connection so Neon
+  scales to zero, while a 5-minute keep-alive ping (which never touches the DB) keeps the API warm.
+  Customer count scales with traffic rate so per-customer behaviour — and model quality (precision
+  0.78 / recall 0.60 vs 0.79 / 0.62 at training settings) — is preserved.
+- **Hugging Face Spaces (all-in-one container):** the whole platform in one container
   (`deploy/hf/`) — supervisord runs Postgres, Redis, Kafka (KRaft), Django, both FastAPI services,
   Next.js and Caddy as uid 1000 on port 7860. Cold boot to fully live in **~25 s** (incl. replaying
   460k historical transactions into the feature store); a self-refreshing "starting up" page covers

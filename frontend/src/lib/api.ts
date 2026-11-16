@@ -33,6 +33,20 @@ export class ApiError extends Error {
   }
 }
 
+const UNREACHABLE = "Can't reach the FinGuard backend — it may be waking up or redeploying. Please try again in a minute.";
+
+/** fetch() that turns network failures (server down / restarting) into a friendly ApiError. */
+async function request(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    const res = await fetch(url, init);
+    if (res.status === 502 || res.status === 503 || res.status === 504) throw new ApiError(res.status, UNREACHABLE);
+    return res;
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(0, UNREACHABLE);
+  }
+}
+
 // ---------------- token store (framework-free, so non-React code can use it) ----------------
 let tokens: Tokens | null = null;
 const listeners = new Set<() => void>();
@@ -87,18 +101,20 @@ async function refreshAccess(): Promise<string | null> {
   // De-duplicate: many parallel requests share one refresh call
   refreshing ??= (async () => {
     try {
-      const res = await fetch(`${API_URL}/api/auth/token/refresh/`, {
+      const res = await request(`${API_URL}/api/auth/token/refresh/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh: current.refresh }),
       });
-      if (!res.ok) throw new Error("refresh failed");
+      if (!res.ok) {
+        save(null); // refresh token rejected (expired/revoked) -> back to login
+        return null;
+      }
       const data = (await res.json()) as { access: string; refresh?: string };
       save({ access: data.access, refresh: data.refresh ?? current.refresh });
       return data.access;
     } catch {
-      save(null); // refresh token expired -> back to login
-      return null;
+      return null; // backend unreachable: keep the session, just fail this call
     } finally {
       refreshing = null;
     }
@@ -115,7 +131,7 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export async function login(username: string, password: string): Promise<void> {
-  const res = await fetch(`${API_URL}/api/auth/token/`, {
+  const res = await request(`${API_URL}/api/auth/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -137,7 +153,7 @@ function errorMessage(body: unknown, status: number): string {
 export async function api<T>(base: Base, path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;
   const send = async (token: string | null) =>
-    fetch(`${BASES[base]}${path}`, {
+    request(`${BASES[base]}${path}`, {
       ...rest,
       headers: {
         ...(json !== undefined ? { "Content-Type": "application/json" } : {}),

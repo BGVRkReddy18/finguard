@@ -6,8 +6,10 @@ from psycopg_pool import AsyncConnectionPool
 
 
 class Database:
-    def __init__(self, url: str):
-        self.pool = AsyncConnectionPool(url, min_size=1, max_size=5, open=False, kwargs={"row_factory": dict_row})
+    def __init__(self, url: str, min_size: int = 1, max_idle: float = 600):
+        # min_size=0 + short max_idle lets a serverless database (e.g. Neon) suspend between visits
+        self.pool = AsyncConnectionPool(url, min_size=min_size, max_size=5, max_idle=max_idle, open=False,
+                                        kwargs={"row_factory": dict_row})
 
     async def open(self) -> None:
         await self.pool.open()

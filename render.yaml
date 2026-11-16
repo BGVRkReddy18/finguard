@@ -1,0 +1,25 @@
+# Render Blueprint — FinGuard Cloud Lite backend (free web service, no card).
+# Dashboard: New -> Blueprint -> pick this repo. Fill the three `sync: false` values when prompted.
+services:
+  - type: web
+    name: finguard-api
+    runtime: docker
+    plan: free
+    region: singapore            # put the Neon project in AWS Singapore too (ap-southeast-1) for low latency
+    dockerfilePath: ./deploy/lite/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health/
+    autoDeploy: true
+    envVars:
+      - key: DJANGO_DATABASE_URL  # Neon connection string (owner role), with ?sslmode=require
+        sync: false
+      - key: FRONTEND_ORIGIN      # your Vercel URL, e.g. https://finguard-xyz.vercel.app
+        sync: false
+      - key: LLM_API_KEY          # free Groq key; leave empty for offline template reports
+        sync: false
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: READONLY_DB_PASSWORD
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        generateValue: true
