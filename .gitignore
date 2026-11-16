@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.sqlite3
+.DS_Store
+node_modules/
+.next/
+data/*
+!data/.gitkeep
+mlruns/

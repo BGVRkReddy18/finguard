@@ -1,0 +1,82 @@
+{
+  "version": "xgb-20261116-d64a63",
+  "trained_at": "2026-11-16T12:10:05.746924+00:00",
+  "feature_names": [
+    "amount_log",
+    "amount_ratio",
+    "amount_zscore",
+    "history_count",
+    "km_from_last",
+    "km_from_home",
+    "minutes_since_last",
+    "speed_kmh_log",
+    "txn_count_10m",
+    "hour",
+    "is_night",
+    "channel_online",
+    "channel_atm",
+    "high_risk_category",
+    "gift_card"
+  ],
+  "threshold": 0.9071727395057678,
+  "best_iteration": 149,
+  "rows": {
+    "train": 322707,
+    "val": 69151,
+    "test": 69152
+  },
+  "test_metrics": {
+    "xgboost": {
+      "name": "xgboost",
+      "threshold": 0.9072,
+      "roc_auc": 0.9793014917908265,
+      "pr_auc": 0.7155560528887756,
+      "precision": 0.7427772600186393,
+      "recall": 0.6207165109034268,
+      "f1": 0.6762834111158252,
+      "fraud_amount_caught": 0.5348292185988539,
+      "false_alerts_per_1k": 4.066717746213237,
+      "recall_by_pattern": {
+        "account_takeover": 0.5899280575539568,
+        "card_not_present": 0.0,
+        "card_testing": 0.776239907727797,
+        "impossible_travel": 0.3
+      }
+    },
+    "rules-v1": {
+      "name": "rules-v1",
+      "threshold": 0.7,
+      "roc_auc": 0.7605092449021896,
+      "pr_auc": 0.1024588163953522,
+      "precision": 0.32233883058470764,
+      "recall": 0.1674454828660436,
+      "f1": 0.2203997949769349,
+      "fraud_amount_caught": 0.4601013874615055,
+      "false_alerts_per_1k": 6.659987033653563,
+      "recall_by_pattern": {
+        "account_takeover": 0.5179856115107914,
+        "card_not_present": 0.0,
+        "card_testing": 0.10726643598615918,
+        "impossible_travel": 0.35714285714285715
+      }
+    }
+  },
+  "shap_importance": {
+    "channel_online": 2.7458999156951904,
+    "amount_log": 0.7670000195503235,
+    "km_from_home": 0.7318000197410583,
+    "amount_ratio": 0.6126000285148621,
+    "km_from_last": 0.5250999927520752,
+    "hour": 0.2838999927043915,
+    "minutes_since_last": 0.20489999651908875,
+    "history_count": 0.19830000400543213,
+    "amount_zscore": 0.19539999961853027,
+    "speed_kmh_log": 0.14139999449253082,
+    "txn_count_10m": 0.06700000166893005,
+    "gift_card": 0.06620000302791595,
+    "high_risk_category": 0.020999999716877937,
+    "channel_atm": 0.017100000753998756,
+    "is_night": 0.011099999770522118
+  },
+  "mlflow_run_id": "d64a63c1dc0344bb8c5be2fa34d209c0"
+}

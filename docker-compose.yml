@@ -1,0 +1,186 @@
+# FinGuard — local development stack
+# Run: docker compose up --build
+x-backend-env: &backend-env
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-change-me}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-finguard}
+  POSTGRES_USER: ${POSTGRES_USER:-finguard}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finguard}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_SCORED_TOPIC: transactions.scored
+  DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-finguard123}
+  KAFKA_CASES_TOPIC: cases.opened
+  AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-dev-service-token}
+  READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-finguard_ro}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16   # pgvector included for the RAG features in Phase 3
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-finguard}
+      POSTGRES_USER: ${POSTGRES_USER:-finguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finguard}
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finguard}"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:3.8.0   # KRaft mode — no ZooKeeper needed
+    ports: ["29092:29092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # One-shot: create topics explicitly (3 partitions -> up to 3 parallel consumers per group)
+  kafka-init:
+    image: apache/kafka:3.8.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in transactions.raw transactions.scored cases.opened; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
+    depends_on:
+      kafka: { condition: service_healthy }
+
+  # One-shot: apply DB migrations and create demo users before anything else starts
+  migrate:
+    build: ./backend
+    command: sh -c "python manage.py migrate --noinput && python manage.py seed_demo_users"
+    environment: *backend-env
+    volumes: [./backend:/app]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  backend:
+    build: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    environment: *backend-env
+    ports: ["8000:8000"]
+    volumes: [./backend:/app]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Kafka consumer: persists scored transactions and opens fraud cases
+  ingest-worker:
+    build: ./backend
+    command: python manage.py consume_scored
+    environment:
+      <<: *backend-env
+      KAFKA_PUBLISH_EVENTS: "true"   # emit cases.opened for the AI agent
+    volumes: [./backend:/app]
+    restart: on-failure
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+
+  ml-service:
+    build: ./ml_service
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLED: "true"
+      SCORER: ${SCORER:-auto}   # auto = trained model if present, else rules
+    ports: ["8001:8001"]
+    volumes: [./ml_service:/app]
+    restart: on-failure
+    depends_on:
+      redis: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+
+  ai-service:
+    build: ./ai_service
+    environment:
+      DATABASE_URL: postgresql://finguard_ro:${READONLY_DB_PASSWORD:-finguard_ro}@postgres:5432/${POSTGRES_DB:-finguard}
+      BACKEND_URL: http://backend:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-dev-service-token}
+      JWT_SECRET: ${DJANGO_SECRET_KEY:-dev-insecure-change-me}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      LLM_FAST_MODEL: ${LLM_FAST_MODEL:-openai/gpt-oss-20b}
+      AUTO_INVESTIGATE_PRIORITIES: ${AUTO_INVESTIGATE_PRIORITIES:-HIGH}
+      AUTO_INVESTIGATE_DAILY_TOKENS: ${AUTO_INVESTIGATE_DAILY_TOKENS:-100000}
+    ports: ["8002:8002"]
+    volumes: [./ai_service:/app]
+    restart: on-failure
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_AI_URL: http://localhost:8002
+        NEXT_PUBLIC_ML_URL: http://localhost:8001
+    ports: ["3000:3000"]
+    depends_on: [backend, ai-service, ml-service]
+
+  simulator:
+    build: ./simulator
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TPS: ${SIM_TPS:-5}
+      NUM_CUSTOMERS: ${SIM_CUSTOMERS:-5000}
+      FRAUD_RATE: ${SIM_FRAUD_RATE:-0.01}
+    volumes: [./data:/data]
+    restart: on-failure
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+
+  # ---- ML tooling (run on demand: `make train`, `make mlflow`) ----
+  trainer:
+    profiles: [tools]
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile.train
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      GIT_PYTHON_REFRESH: quiet
+    volumes: [./ml_service:/app, ./data:/data, ./mlruns:/mlruns]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  mlflow:
+    profiles: [tools]
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile.train
+    command: mlflow ui --backend-store-uri file:///mlruns --host 0.0.0.0 --port 5000
+    ports: ["5050:5000"]   # 5000 is taken by AirPlay on macOS
+    volumes: [./mlruns:/mlruns]
+
+volumes:
+  pgdata:
