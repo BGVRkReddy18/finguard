@@ -6,11 +6,14 @@ import { useEffect, useState } from "react";
 import { Button, ErrorNote } from "@/components/ui";
 import { useSession } from "@/lib/session";
 
+// Which demo accounts the login page offers. Production lists only analyst,manager — the admin
+// account has its own secret password and is never advertised.
+const SHOWN = (process.env.NEXT_PUBLIC_DEMO_ACCOUNTS ?? "analyst,manager,admin").split(",");
 const DEMO = [
   { username: "analyst", role: "Fraud analyst" },
   { username: "manager", role: "Risk manager" },
   { username: "admin", role: "Administrator" },
-];
+].filter((d) => SHOWN.includes(d.username));
 
 export default function LoginPage() {
   const { user, login } = useSession();
@@ -66,7 +69,7 @@ export default function LoginPage() {
           <Button type="submit" variant="primary" loading={busy} className="w-full">Sign in</Button>
         </form>
 
-        <div className="mt-4 rounded-xl border border-dashed border-line p-4">
+        {DEMO.length > 0 && <div className="mt-4 rounded-xl border border-dashed border-line p-4">
           <div className="text-xs font-medium text-ink-2">Demo accounts <span className="font-normal text-ink-3">(password: finguard123)</span></div>
           <div className="mt-2 flex flex-wrap gap-2">
             {DEMO.map((d) => (
@@ -77,7 +80,7 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
       </div>
     </main>
   );

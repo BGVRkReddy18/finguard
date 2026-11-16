@@ -4,9 +4,10 @@ import time
 from collections import defaultdict, deque
 from datetime import date
 
-from openai import AsyncOpenAI
+from openai import APIError, AsyncOpenAI, RateLimitError
 
 from .config import Settings
+from .metrics import LLM_LATENCY, LLM_REQUESTS, LLM_TOKENS
 
 
 class RateLimiter:
@@ -50,9 +51,21 @@ class LLMClient:
             kwargs["tool_choice"] = "auto"
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        response = await self.client.chat.completions.create(**kwargs)
+        model_name = kwargs["model"]
+        start = time.perf_counter()
+        try:
+            response = await self.client.chat.completions.create(**kwargs)
+        except RateLimitError:
+            LLM_REQUESTS.labels(model_name, "rate_limited").inc()
+            raise
+        except APIError:
+            LLM_REQUESTS.labels(model_name, "error").inc()
+            raise
+        LLM_LATENCY.labels(model_name).observe(time.perf_counter() - start)
+        LLM_REQUESTS.labels(model_name, "ok").inc()
         if response.usage:
-            self.usage[(date.today(), kwargs["model"])] += response.usage.total_tokens
+            self.usage[(date.today(), model_name)] += response.usage.total_tokens
+            LLM_TOKENS.labels(model_name).inc(response.usage.total_tokens)
         return response
 
     def tokens_today(self, model: str) -> int:

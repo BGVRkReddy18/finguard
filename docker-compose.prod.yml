@@ -1,0 +1,227 @@
+# FinGuard — production stack (single VM, e.g. Oracle Cloud Always Free ARM).
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# Only Caddy publishes ports. Databases, Kafka and internal APIs are reachable only inside this network.
+
+x-restart: &restart
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-backend-env: &backend-env
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set in .env.prod}
+  DJANGO_DEBUG: "false"
+  DJANGO_ALLOWED_HOSTS: ${DOMAIN:?set in .env.prod},backend
+  CSRF_TRUSTED_ORIGINS: https://${DOMAIN}
+  CORS_ALLOWED_ORIGINS: https://${DOMAIN}
+  POSTGRES_HOST: postgres
+  POSTGRES_DB: finguard
+  POSTGRES_USER: finguard
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_SCORED_TOPIC: transactions.scored
+  KAFKA_CASES_TOPIC: cases.opened
+  AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?set in .env.prod}
+  READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:?set in .env.prod}
+  DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-finguard123}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set in .env.prod}
+
+services:
+  caddy:
+    <<: *restart
+    image: caddy:2.8.4-alpine
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      SITE_ADDRESS: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [frontend, backend, ai-service, ml-service]
+
+  postgres:
+    <<: *restart
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: finguard
+      POSTGRES_USER: finguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finguard"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes: [redisdata:/data]   # feature store survives restarts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  kafka:
+    <<: *restart
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 24      # it's a stream, not an archive — keep the disk small
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    volumes: [kafkadata:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for t in transactions.raw transactions.scored cases.opened; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
+        done
+    depends_on:
+      kafka: { condition: service_healthy }
+
+  migrate:
+    build: ./backend
+    command: sh -c "python manage.py migrate --noinput && python manage.py seed_demo_users"
+    environment: *backend-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  backend:
+    <<: *restart
+    build: ./backend
+    command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--access-logfile", "-"]
+    environment: *backend-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  ingest-worker:
+    <<: *restart
+    build: ./backend
+    command: python manage.py consume_scored
+    environment:
+      <<: *backend-env
+      KAFKA_PUBLISH_EVENTS: "true"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+
+  ml-service:
+    <<: *restart
+    build: ./ml_service
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCORER: auto
+      CORS_ORIGINS: https://${DOMAIN}
+    depends_on:
+      redis: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+
+  ai-service:
+    <<: *restart
+    build: ./ai_service
+    # One process on purpose: the per-user limiter, token budget and WebSocket fan-out are in-memory
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    environment:
+      DATABASE_URL: postgresql://finguard_ro:${READONLY_DB_PASSWORD}@postgres:5432/finguard
+      BACKEND_URL: http://backend:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN}
+      JWT_SECRET: ${DJANGO_SECRET_KEY}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CORS_ORIGINS: https://${DOMAIN}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      LLM_FAST_MODEL: ${LLM_FAST_MODEL:-openai/gpt-oss-20b}
+      AUTO_INVESTIGATE_PRIORITIES: ${AUTO_INVESTIGATE_PRIORITIES:-HIGH}
+      AUTO_INVESTIGATE_DAILY_TOKENS: ${AUTO_INVESTIGATE_DAILY_TOKENS:-60000}
+      USER_ASK_PER_HOUR: ${USER_ASK_PER_HOUR:-20}
+      USER_INVESTIGATE_PER_HOUR: ${USER_INVESTIGATE_PER_HOUR:-20}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+
+  frontend:
+    <<: *restart
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMAIN}
+        NEXT_PUBLIC_AI_URL: https://${DOMAIN}/ai
+        NEXT_PUBLIC_ML_URL: https://${DOMAIN}/ml
+        NEXT_PUBLIC_DEMO_ACCOUNTS: analyst,manager
+
+  simulator:
+    <<: *restart
+    build: ./simulator
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TPS: ${SIM_TPS:-3}
+      NUM_CUSTOMERS: 5000
+      FRAUD_RATE: 0.01
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+
+  prometheus:
+    <<: *restart
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+
+  grafana:
+    <<: *restart
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SERVER_ROOT_URL: https://${DOMAIN}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env.prod}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/finguard.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on: [prometheus]
+
+  # On-demand: warm the feature store from simulated history (deploy/bootstrap.sh runs this)
+  trainer:
+    profiles: [tools]
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile.train
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      GIT_PYTHON_REFRESH: quiet
+    volumes: [./data:/data]
+
+volumes:
+  pgdata:
+  redisdata:
+  kafkadata:
+  promdata:
+  grafanadata:
+  caddy_data:
+  caddy_config:

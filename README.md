@@ -120,6 +120,41 @@ Engineering notes:
   `/ask` returns a clean 503 on quota exhaustion and still returns data if only the summary fails.
   Known limitation: the meter is in-memory and resets on restart (Redis would persist it).
 
+## Production engineering (Phase 5)
+
+**CI (GitHub Actions)** — on every push/PR: `ruff` lint · unit tests for all three Python services ·
+frontend type-check, lint and production build · Docker build of every image · and an
+**integration job on real Postgres** that applies migrations, checks for missing migrations, runs the
+backend suite and *proves* the AI's read-only role is least-privilege (`backend/scripts/verify_readonly_role.py`).
+
+**CD** — after CI passes on `main`, GitHub Actions deploys over SSH (pinned host key) and smoke-tests
+the public URLs. Off until `DEPLOY_ENABLED=true`.
+
+**Monitoring** — `make monitoring` → Grafana on http://localhost:3001 (dashboard *FinGuard — Operations*):
+scoring throughput and p50/p95/p99 latency, transactions by risk level, **Kafka consumer lag**, LLM
+calls by outcome (incl. rate-limited), LLM tokens per model against the free-tier quota, LLM latency,
+AI investigations by recommendation, live WebSocket clients.
+
+**Load test** (`loadtest/locustfile.py`, Locust) — `POST /score` (Redis feature store + XGBoost + SHAP),
+run on a MacBook Air (8 cores) alongside ~13 other containers, so treat as a lower bound:
+
+| Scenario | Throughput | p50 | p95 | p99 | Errors |
+|---|---|---|---|---|---|
+| Steady load, 4 workers | 295 req/s | **6 ms** | 36 ms | 130 ms | 0 / 13,015 |
+| Saturation, 1 worker (64 concurrent) | 701 req/s | 82 ms | 150 ms | 210 ms | 0 / 30,913 |
+| Saturation, 4 workers (64 concurrent) | **1,217 req/s** | 45 ms | 92 ms | 150 ms | 0 / 53,714 |
+
+Saturation latency is mostly queueing (Little's law: 64 / 1,217 req/s ≈ 52 ms ≈ measured p50); the
+steady-load row is the operating latency. Workers scale throughput because all state lives in Redis.
+
+**Production stack** (`docker-compose.prod.yml`, guide in [DEPLOY.md](DEPLOY.md)) — Caddy with automatic
+HTTPS and security headers is the only public entry point; path allow-lists keep `/metrics`,
+`/docs` and `/ml/score` internal; gunicorn + WhiteNoise for Django (`check --deploy` clean, refuses
+weak secrets); Redis AOF persistence; bounded Kafka heap and 24 h retention; capped container logs;
+random secrets in a mode-600 `.env.prod`; per-user hourly limits on LLM endpoints; admin password
+separate from the public demo accounts. Verified locally end to end, including a browser session
+over `wss://` through Caddy and a scan showing Postgres/Redis/Kafka/internal ports closed.
+
 ## Quick start
 
 Requires Docker.
@@ -140,6 +175,7 @@ make down                 # stop
 | http://localhost:8001/docs | FastAPI interactive docs |
 | http://localhost:8001/metrics | Prometheus metrics |
 | http://localhost:8002/docs | AI service docs (`/investigate/{case_id}`, `/ask`) |
+| http://localhost:3001 | Grafana (after `make monitoring`) |
 
 ### Train the model
 
@@ -207,4 +243,4 @@ without device or IP signals); card-not-present fraud needs signals this simulat
 - [x] **Phase 2** — XGBoost on 461k replayed transactions, SHAP reasons, MLflow tracking, threshold tuning, Redis backfill
 - [x] **Phase 3** — LLM risk-analyst agent with tool calls, event-driven auto-investigation, guarded text-to-SQL
 - [x] **Phase 4** — Next.js analyst console: live WebSocket feed, case workflow, AI investigations, Ask AI, model card
-- [ ] **Phase 5** — GitHub Actions CI/CD, Prometheus + Grafana, Locust load tests, deploy to Oracle Cloud Always Free
+- [x] **Phase 5** — CI/CD (GitHub Actions), Prometheus + Grafana, Locust load tests, hardened production stack for Oracle Cloud Always Free

@@ -3,8 +3,9 @@ import asyncio
 import json
 import logging
 
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaConnectionError
+from prometheus_client import Gauge
 from pydantic import ValidationError
 
 from .config import Settings
@@ -12,6 +13,9 @@ from .schemas import TransactionIn
 from .scoring import ScoringPipeline
 
 logger = logging.getLogger("scoring-worker")
+
+# Messages waiting in Kafka behind this consumer: the key "are we keeping up?" signal under load
+CONSUMER_LAG = Gauge("finguard_consumer_lag", "Scoring consumer lag (messages)", ["partition"])
 
 
 async def _start_with_retry(client, name: str, attempts: int = 20) -> None:
@@ -61,6 +65,9 @@ async def run_scoring_worker(settings: Settings, pipeline: ScoringPipeline, stat
             )
             # Commit only after the scored event is safely written — at-least-once delivery
             await consumer.commit()
+            highwater = consumer.highwater(TopicPartition(msg.topic, msg.partition))
+            if highwater is not None:
+                CONSUMER_LAG.labels(str(msg.partition)).set(max(0, highwater - msg.offset - 1))
             state["processed"] = state.get("processed", 0) + 1
     finally:
         state["worker"] = "stopped"

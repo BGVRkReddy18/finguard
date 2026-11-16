@@ -19,9 +19,15 @@ from pathlib import Path
 import mlflow
 import numpy as np
 import pandas as pd
-from sklearn.metrics import average_precision_score, f1_score, precision_recall_curve, precision_score, \
-    recall_score, roc_auc_score
 import xgboost as xgb
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from xgboost import XGBClassifier
 
 from app.model import FEATURE_NAMES
@@ -119,7 +125,7 @@ def main() -> None:
 
         booster = model.get_booster()
         shap = booster.predict(xgb.DMatrix(X[test], feature_names=FEATURE_NAMES), pred_contribs=True)
-        importance = dict(sorted(zip(FEATURE_NAMES, np.abs(shap[:, :-1]).mean(axis=0).round(4).tolist()),
+        importance = dict(sorted(zip(FEATURE_NAMES, np.abs(shap[:, :-1]).mean(axis=0).round(4).tolist(), strict=False),
                                  key=lambda kv: -kv[1]))
         print("\nmean |SHAP| (global feature importance):")
         for name, value in list(importance.items())[:8]:

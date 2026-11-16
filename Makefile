@@ -1,4 +1,4 @@
-.PHONY: up down logs ps test test-backend test-ml test-ai test-frontend shell reset dataset train backfill ml-bootstrap mlflow evaluate
+.PHONY: up down logs ps test test-backend test-ml test-ai test-frontend shell reset dataset train backfill ml-bootstrap mlflow evaluate monitoring
 
 up:            ## Build and start the whole stack
 	docker compose up --build -d
@@ -52,3 +52,6 @@ mlflow:        ## MLflow UI on http://localhost:5050
 
 evaluate:      ## Live precision/recall per model version (from ground-truth labels)
 	docker compose exec backend python manage.py evaluate_live
+
+monitoring:    ## Prometheus on :9090, Grafana on :3001 (dashboard "FinGuard — Operations")
+	docker compose --profile monitoring up -d prometheus grafana

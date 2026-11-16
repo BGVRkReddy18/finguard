@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
 from .agent import InvestigationReport, RiskAnalystAgent
@@ -12,6 +13,8 @@ from .auth import AuthError, current_user_id, decode_user_id
 from .config import get_settings
 from .db import Database
 from .llm import LLMClient
+from .metrics import ASK_REQUESTS, INVESTIGATIONS, WS_CLIENTS
+from .ratelimit import UserRateLimiter
 from .realtime import Broadcaster, run_fanout
 from .tools import Toolbox
 from .worker import BackendClient, run_auto_investigator
@@ -48,6 +51,7 @@ def create_app(db: Database | None = None, llm: LLMClient | None | object = _DEF
         app.state.backend = backend or BackendClient(settings)
         app.state.worker_state = {"worker": "disabled", "realtime": "disabled"}
         app.state.broadcaster = Broadcaster()
+        WS_CLIENTS.set_function(lambda: len(app.state.broadcaster.queues))
         if app.state.llm is None:
             logger.warning("LLM_API_KEY not set — running in offline mode (template reports, no /ask)")
 
@@ -69,6 +73,9 @@ def create_app(db: Database | None = None, llm: LLMClient | None | object = _DEF
 
     app = FastAPI(title="FinGuard AI Service", version="0.1.0", lifespan=lifespan,
                   description="LLM risk-analyst agent, natural-language fraud analytics and live event stream.")
+    ask_limit = UserRateLimiter(settings.user_ask_per_hour)
+    investigate_limit = UserRateLimiter(settings.user_investigate_per_hour)
+    app.mount("/metrics", make_asgi_app())
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","),
                        allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 
@@ -118,6 +125,7 @@ def create_app(db: Database | None = None, llm: LLMClient | None | object = _DEF
     @app.post("/investigate/{case_id}", response_model=InvestigationResponse)
     async def investigate(case_id: int, request: Request, user_id: int = Depends(current_user_id)):
         """On-demand investigation with the high-quality model; the report is saved to the case."""
+        investigate_limit.check(user_id)
         agent = RiskAnalystAgent(request.app.state.llm, Toolbox(request.app.state.db))
         try:
             report, trace = await agent.investigate(case_id)
@@ -125,20 +133,28 @@ def create_app(db: Database | None = None, llm: LLMClient | None | object = _DEF
             raise HTTPException(404, str(exc)) from exc
         await request.app.state.backend.post_report(case_id, report)
         publish_report(request.app, case_id, report)
+        source = "offline" if report.model.startswith("offline") else "llm"
+        INVESTIGATIONS.labels("on_demand", source, report.recommendation).inc()
         logger.info("User %s investigated case %s -> %s", user_id, case_id, report.recommendation)
         return InvestigationResponse(case_id=case_id, report=report, tool_calls=trace["tool_calls"])
 
     @app.post("/ask", response_model=AskResponse)
     async def ask_question(body: AskRequest, request: Request, user_id: int = Depends(current_user_id)):
         """Ask a question about fraud data in plain English."""
+        ask_limit.check(user_id)
         if request.app.state.llm is None:
+            ASK_REQUESTS.labels("unavailable").inc()
             raise HTTPException(503, "Natural-language analytics needs an LLM: set LLM_API_KEY")
         try:
-            return await ask(body.question, request.app.state.llm, request.app.state.db)
+            result = await ask(body.question, request.app.state.llm, request.app.state.db)
         except AnalyticsError as exc:
+            ASK_REQUESTS.labels("rejected").inc()
             raise HTTPException(422, str(exc)) from exc
         except LLMUnavailableError as exc:
+            ASK_REQUESTS.labels("unavailable").inc()
             raise HTTPException(503, str(exc)) from exc
+        ASK_REQUESTS.labels("ok").inc()
+        return result
 
     return app
 

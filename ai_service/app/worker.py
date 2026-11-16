@@ -13,6 +13,7 @@ from aiokafka.errors import KafkaConnectionError
 
 from .agent import InvestigationReport, RiskAnalystAgent
 from .config import Settings
+from .metrics import INVESTIGATIONS
 
 logger = logging.getLogger("ai-worker")
 
@@ -66,6 +67,8 @@ async def run_auto_investigator(settings: Settings, agent: RiskAnalystAgent, bac
                         await backend.post_report(event["case_id"], report)
                         if on_report:
                             on_report(event["case_id"], report)
+                        source = "offline" if report.model.startswith("offline") else "llm"
+                        INVESTIGATIONS.labels("auto", source, report.recommendation).inc()
                         state["investigated"] = state.get("investigated", 0) + 1
                         logger.info("Case %s -> %s (%.2f) via %s, %d tool calls", event["case_id"],
                                     report.recommendation, report.confidence, report.model, len(trace["tool_calls"]))

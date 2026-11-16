@@ -1,0 +1,22 @@
+line-length = 130
+target-version = "py312"
+extend-exclude = ["**/migrations/**", "frontend", "mlruns", "data"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+  "S101",  # assert is how pytest works
+  "S311",  # random is fine for the transaction simulator (not crypto)
+  "S608",  # SQL strings: tool queries are parameterised; LLM SQL goes through sql_guard
+  "B008",  # FastAPI Depends() in defaults is the idiomatic pattern
+  "UP017", # datetime.UTC vs timezone.utc — keep the explicit form
+]
+
+[lint.isort]
+# Each service is its own import root
+known-first-party = ["app", "training", "config", "accounts", "cases", "transactions", "generator"]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106", "S107"]  # test passwords / tokens
+"backend/config/settings.py" = ["S105"]  # dev-only default secret, overridden by env
+"ai_service/app/config.py" = ["S105"]

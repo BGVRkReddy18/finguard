@@ -12,6 +12,7 @@ from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaConnectionError
 
 from .config import Settings
+from .metrics import WS_DROPPED
 
 logger = logging.getLogger("realtime")
 QUEUE_SIZE = 500
@@ -36,6 +37,7 @@ class Broadcaster:
             if queue.full():  # slow consumer: drop its oldest message rather than block everyone
                 queue.get_nowait()
                 self.dropped += 1
+                WS_DROPPED.inc()
             queue.put_nowait(data)
 
 

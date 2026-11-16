@@ -32,7 +32,7 @@ def validate_sql(sql: str) -> str:
     if len(statements) != 1:
         raise UnsafeSQLError("Exactly one statement is allowed")
     tree = statements[0]
-    if not isinstance(tree, (exp.Select, exp.Union)):
+    if not isinstance(tree, exp.Select | exp.Union):
         raise UnsafeSQLError("Only SELECT queries are allowed")
 
     for node in tree.walk():

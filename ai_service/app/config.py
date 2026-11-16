@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-insecure-change-me"      # = Django SECRET_KEY, to verify user JWTs
 
     cors_origins: str = "http://localhost:3000"
+    # Per-user hourly limits on LLM-backed endpoints (0 = unlimited). Protects the free-tier quota.
+    user_ask_per_hour: int = 30
+    user_investigate_per_hour: int = 30
 
     kafka_enabled: bool = True
     kafka_bootstrap_servers: str = "localhost:29092"

@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncMinute

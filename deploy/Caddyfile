@@ -1,0 +1,55 @@
+# FinGuard production entry point. Caddy obtains and renews the TLS certificate automatically.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# --- AI service: only the endpoints the console uses (no /metrics, no /docs) ---
+	@ai path /ai/ask /ai/investigate/* /ai/ws/live /ai/health
+	handle @ai {
+		uri strip_prefix /ai
+		reverse_proxy ai-service:8002
+	}
+
+	# --- ML service: read-only model card + health. /score is internal (stream only) ---
+	@ml path /ml/model/info /ml/health
+	handle @ml {
+		uri strip_prefix /ml
+		reverse_proxy ml-service:8001
+	}
+
+	# --- Grafana (password protected) ---
+	handle /grafana* {
+		reverse_proxy grafana:3000
+	}
+
+	# --- Django: REST API, admin, admin static files ---
+	@django path /api/* /admin /admin/* /static/*
+	handle @django {
+		reverse_proxy backend:8000
+	}
+
+	# Anything else under /ai or /ml is not public. (Must be a handle block placed before the
+	# catch-all: Caddy runs handle before respond, so a bare `respond` here would never fire.)
+	@internal path /ai /ai/* /ml /ml/*
+	handle @internal {
+		respond "Not found" 404
+	}
+
+	# --- Next.js console ---
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

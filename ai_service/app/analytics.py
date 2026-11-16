@@ -35,7 +35,8 @@ SQL_PROMPT = """You translate fraud-analytics questions into a single PostgreSQL
 {schema}
 
 Return JSON: {{"sql": "...", "chart": "bar" | "line" | "table" | "number", "title": "short chart title"}}.
-Use clear column aliases. If the question cannot be answered from these tables, return {{"sql": "", "chart": "table", "title": "unanswerable"}}."""
+Use clear column aliases. If the question cannot be answered from these tables, return
+{{"sql": "", "chart": "table", "title": "unanswerable"}}."""
 
 ANSWER_PROMPT = """Question: {question}
 SQL result ({n} rows, first rows shown): {rows}

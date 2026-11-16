@@ -232,7 +232,8 @@ async def test_ask_returns_data_when_only_summary_fails():
     class SummaryFails(FakeLLM):
         async def chat(self, messages, **kwargs):
             if kwargs.get("json_mode"):
-                return completion(content=json.dumps({"sql": "SELECT city, count(*) AS n FROM transactions_transaction GROUP BY city", "chart": "bar", "title": "t"}))
+                sql = "SELECT city, count(*) AS n FROM transactions_transaction GROUP BY city"
+                return completion(content=json.dumps({"sql": sql, "chart": "bar", "title": "t"}))
             raise _rate_limit_error()
 
     result = await ask("fraud by city", SummaryFails([]), FakeDB())
@@ -256,3 +257,22 @@ def test_llm_client_counts_tokens_per_model():
     asyncio.run(client.chat([{"role": "user", "content": "hi"}], model="m1"))
     asyncio.run(client.chat([{"role": "user", "content": "hi"}], model="m1"))
     assert client.tokens_today("m1") == 2400 and client.tokens_today("m2") == 0
+
+
+def test_per_user_rate_limit_on_llm_endpoints(monkeypatch):
+    from app.config import get_settings
+    from app.main import create_app
+
+    monkeypatch.setenv("USER_INVESTIGATE_PER_HOUR", "2")
+    get_settings.cache_clear()
+    try:
+        app = create_app(db=FakeDB(), llm=None, backend=FakeBackend(), start_worker=False)
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {make_token()}"}
+            assert client.post("/investigate/7", headers=headers).status_code == 200
+            assert client.post("/investigate/7", headers=headers).status_code == 200
+            blocked = client.post("/investigate/7", headers=headers)
+            assert blocked.status_code == 429
+            assert int(blocked.headers["Retry-After"]) > 0
+    finally:
+        get_settings.cache_clear()

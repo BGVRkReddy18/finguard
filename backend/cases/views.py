@@ -8,7 +8,13 @@ from accounts.models import User
 from accounts.permissions import HasServiceToken, IsManagerOrAdmin
 
 from .models import AuditLog, FraudCase
-from .serializers import AIReportSerializer, AssignSerializer, AuditLogSerializer, FraudCaseSerializer, ResolveSerializer
+from .serializers import (
+    AIReportSerializer,
+    AssignSerializer,
+    AuditLogSerializer,
+    FraudCaseSerializer,
+    ResolveSerializer,
+)
 from .services import CaseError, assign_case, attach_ai_report, resolve_case
 
 
@@ -37,7 +43,7 @@ class FraudCaseViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             assign_case(case, assignee, request.user)
         except CaseError as exc:
-            raise ValidationError(str(exc))
+            raise ValidationError(str(exc)) from exc
         return Response(FraudCaseSerializer(case).data)
 
     @action(detail=True, methods=["post"])
@@ -50,7 +56,7 @@ class FraudCaseViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             resolve_case(case, data.validated_data["status"], data.validated_data["note"], request.user)
         except CaseError as exc:
-            raise ValidationError(str(exc))
+            raise ValidationError(str(exc)) from exc
         return Response(FraudCaseSerializer(case).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="ai-report",
