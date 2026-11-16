@@ -50,10 +50,18 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           python - <<'PY'
-          import os
+          import os, sys
           from huggingface_hub import HfApi
+          from huggingface_hub.errors import HfHubHTTPError
           api, space = HfApi(token=os.environ["HF_TOKEN"]), os.environ["HF_SPACE"]
-          api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
+          try:
+              if not api.repo_exists(space, repo_type="space"):
+                  api.create_repo(space, repo_type="space", space_sdk="docker")
+          except HfHubHTTPError as e:  # surface Hugging Face's own explanation (e.g. 402/403 policy errors)
+              body = e.response.text if e.response is not None else ""
+              sys.exit(f"Could not create the Space: {e}\n{body}\n"
+                       "Create it once by hand at https://huggingface.co/new-space (SDK: Docker, hardware: CPU basic)"
+                       " and re-run this workflow.")
           if os.environ.get("LLM_API_KEY"):
               api.add_space_secret(space, "LLM_API_KEY", os.environ["LLM_API_KEY"])
           api.upload_folder(repo_id=space, repo_type="space", folder_path="/tmp/space",
