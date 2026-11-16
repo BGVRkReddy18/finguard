@@ -1,5 +1,7 @@
 # FinGuard — Real-Time Fraud Detection & AI Risk Analyst Platform
 
+[![CI](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml/badge.svg)](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml)
+
 FinGuard scores card transactions for fraud in real time as they stream through Kafka, explains every
 decision, and routes suspicious ones to a case-management workflow for fraud analysts — with a full
 audit trail, the way banks require.
