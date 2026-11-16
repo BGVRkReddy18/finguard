@@ -39,3 +39,19 @@ def test_audit_log_is_immutable(make_event):
         entry.save()
     with pytest.raises(ValueError):
         entry.delete()
+
+
+def test_prune_keeps_flagged_and_recent(make_event):
+    from datetime import timedelta
+
+    from django.core.management import call_command
+    from django.utils import timezone
+
+    old = (timezone.now() - timedelta(hours=100)).isoformat()
+    ingest_scored_event(make_event(timestamp=old))                                    # old, legit -> pruned
+    ingest_scored_event(make_event(timestamp=old, score=0.95, flagged=True, risk="HIGH"))  # old, flagged -> kept
+    ingest_scored_event(make_event())                                                  # recent -> kept
+    call_command("prune_transactions", hours=48)
+    assert Transaction.objects.count() == 2
+    assert Transaction.objects.filter(is_flagged=True).count() == 1
+    assert FraudCase.objects.count() == 1

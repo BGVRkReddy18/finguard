@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml/badge.svg)](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml)
 
+**Live demo: [gvrkrishnareddybommareddy-finguard.hf.space](https://gvrkrishnareddybommareddy-finguard.hf.space)** — sign in as `analyst` / `finguard123`
+or `manager` / `finguard123`. (Hosted free on Hugging Face Spaces; data is simulated.)
+
 FinGuard scores card transactions for fraud in real time as they stream through Kafka, explains every
 decision, and routes suspicious ones to a case-management workflow for fraud analysts — with a full
 audit trail, the way banks require.
@@ -149,7 +152,14 @@ run on a MacBook Air (8 cores) alongside ~13 other containers, so treat as a low
 Saturation latency is mostly queueing (Little's law: 64 / 1,217 req/s ≈ 52 ms ≈ measured p50); the
 steady-load row is the operating latency. Workers scale throughput because all state lives in Redis.
 
-**Production stack** (`docker-compose.prod.yml`, guide in [DEPLOY.md](DEPLOY.md)) — Caddy with automatic
+**Two deployment targets** (guide in [DEPLOY.md](DEPLOY.md)):
+- **Hugging Face Spaces (live demo, free, no card):** the whole platform in one container
+  (`deploy/hf/`) — supervisord runs Postgres, Redis, Kafka (KRaft), Django, both FastAPI services,
+  Next.js and Caddy as uid 1000 on port 7860. Cold boot to fully live in **~25 s** (incl. replaying
+  460k historical transactions into the feature store); a self-refreshing "starting up" page covers
+  that window; hourly retention keeps an always-on demo's disk bounded. GitHub Actions syncs the
+  Space after CI passes; an external uptime monitor keeps it from idling.
+- **Multi-service VM** (`docker-compose.prod.yml`, e.g. Oracle Cloud Always Free): — Caddy with automatic
 HTTPS and security headers is the only public entry point; path allow-lists keep `/metrics`,
 `/docs` and `/ml/score` internal; gunicorn + WhiteNoise for Django (`check --deploy` clean, refuses
 weak secrets); Redis AOF persistence; bounded Kafka heap and 24 h retention; capped container logs;
@@ -234,6 +244,11 @@ Recall by pattern (XGBoost): card testing 0.78, account takeover 0.59, impossibl
 card-not-present 0.00. Training takes ~3 s. Scoring compute: p50 0.15 ms (fast path), 0.9 ms with SHAP
 (only computed for risky transactions), 0.46 ms for the Redis feature lookup; top global features by mean |SHAP|: online channel,
 amount, distance from home, amount vs. customer average.
+
+**Train/serve skew, measured:** serving at a different traffic rate than training changes the
+velocity and history features. Replaying 26 h through the live feature code at 5 tx/s (training rate)
+gives precision 0.79 / recall 0.62; at 3 tx/s it drops to 0.72 / 0.59 — so every deployment runs the
+simulator at the training rate.
 
 **Known limitations / next steps:** impossible-travel recall is weak (genuine travel looks similar
 without device or IP signals); card-not-present fraud needs signals this simulator doesn't produce

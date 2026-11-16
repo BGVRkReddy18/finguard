@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { AI_URL, api, getAccessToken, login as apiLogin, tokenStore } from "./api";
+import { aiWebSocketBase, api, getAccessToken, login as apiLogin, tokenStore } from "./api";
 import type { LiveEvent, User } from "./types";
 
 // ---------------------------------------------------------------- session (who is logged in)
@@ -96,7 +96,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       setStatus("connecting");
       const token = await getAccessToken(); // fresh token on every (re)connect
       if (!token || closed) return;
-      socket = new WebSocket(`${AI_URL.replace(/^http/, "ws")}/ws/live?token=${encodeURIComponent(token)}`);
+      socket = new WebSocket(`${aiWebSocketBase()}/ws/live?token=${encodeURIComponent(token)}`);
       socket.onopen = () => {
         retry = 0;
         setStatus("live");

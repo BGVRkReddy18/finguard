@@ -1,4 +1,34 @@
-# Deploying FinGuard (free) — Oracle Cloud Always Free
+# Deploying FinGuard (free)
+
+Two options:
+
+| | Hugging Face Spaces (live demo) | Oracle Cloud VM |
+|---|---|---|
+| Cost / card | Free, **email signup only** | Free, card needed for verification |
+| Runs | All services in one container | Separate containers (`docker-compose.prod.yml`) |
+| Data | Simulated, resets on restart | Persistent volumes |
+| Setup | Automatic from GitHub Actions | ~40 min, see below |
+
+## Option A — Hugging Face Spaces (what the live demo uses)
+
+1. Create an account at huggingface.co and a **Write** token (Settings → Access Tokens).
+2. In the GitHub repo:
+   ```bash
+   gh secret set HF_TOKEN                      # paste the hf_... token
+   gh secret set LLM_API_KEY < <(grep '^LLM_API_KEY=' .env | cut -d= -f2-)   # Groq key, passed to the Space as a secret
+   gh variable set HF_SPACE --body "<hf-username>/finguard"
+   gh workflow run "Deploy to Hugging Face"   # or just push to main
+   ```
+3. The workflow creates the Space and uploads the repo; Hugging Face builds `deploy/hf/Dockerfile`
+   (~5–10 min the first time). The app is at `https://<hf-username>-finguard.hf.space`.
+4. **Keep it awake:** free Spaces sleep after 48 h without visitors. Add a free monitor at
+   **uptimerobot.com** (email signup): *New monitor → HTTP(s) → URL `https://<hf-username>-finguard.hf.space/api/health/`
+   → interval 5 min*. You also get a public status page to link.
+
+Optional Space secrets: `ADMIN_PASSWORD` (Django admin; random if unset), `SIM_TPS` (default 5 —
+keep it equal to the training rate).
+
+## Option B — Oracle Cloud Always Free VM
 
 Target: one **Ampere A1 ARM VM (4 OCPU, 24 GB RAM)** from Oracle's Always Free tier, HTTPS via
 **Caddy + Let's Encrypt**, and a free hostname from **sslip.io** (`<your-ip>.sslip.io`), so no domain

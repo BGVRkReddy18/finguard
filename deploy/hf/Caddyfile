@@ -1,0 +1,54 @@
+# Same routing as deploy/Caddyfile, but plain HTTP on :7860 — Hugging Face terminates TLS in front.
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static 0.0.0.0/0 ::/0   # only the Spaces proxy can reach this port
+	}
+}
+
+:7860 {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The Space page on huggingface.co shows the app in an iframe
+		Content-Security-Policy "frame-ancestors 'self' https://huggingface.co"
+		-Server
+	}
+
+	@ai path /ai/ask /ai/investigate/* /ai/ws/live /ai/health
+	handle @ai {
+		uri strip_prefix /ai
+		reverse_proxy 127.0.0.1:8002
+	}
+
+	@ml path /ml/model/info /ml/health
+	handle @ml {
+		uri strip_prefix /ml
+		reverse_proxy 127.0.0.1:8001
+	}
+
+	@django path /api/* /admin /admin/* /static/*
+	handle @django {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	@internal path /ai /ai/* /ml /ml/*
+	handle @internal {
+		respond "Not found" 404
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# While the services are still booting, show a friendly page that refreshes itself
+	handle_errors 502 503 504 {
+		rewrite * /starting.html
+		root * /srv/hf
+		file_server {
+			status 503
+		}
+	}
+}

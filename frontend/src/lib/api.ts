@@ -5,9 +5,18 @@
  * signed in. Trade-off noted in the README: an httpOnly-cookie BFF would hide tokens from JS (XSS),
  * at the cost of proxying every call — and the WebSocket — through Next.js.
  */
+// Absolute URLs (local dev: separate ports) or same-origin paths (behind a reverse proxy: "", "/ai",
+// "/ml") — the latter makes one build work on any domain.
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export const AI_URL = process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:8002";
 export const ML_URL = process.env.NEXT_PUBLIC_ML_URL ?? "http://localhost:8001";
+
+/** WebSocket base for the AI service, from an absolute URL or a same-origin path. */
+export function aiWebSocketBase(): string {
+  if (/^https?:\/\//.test(AI_URL)) return AI_URL.replace(/^http/, "ws");
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}${AI_URL}`;
+}
 
 const BASES = { core: API_URL, ai: AI_URL, ml: ML_URL } as const;
 type Base = keyof typeof BASES;

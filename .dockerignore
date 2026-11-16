@@ -1,0 +1,13 @@
+# Only used by the all-in-one image (deploy/hf/Dockerfile builds from the repo root)
+.git
+**/__pycache__
+**/.pytest_cache
+frontend/node_modules
+frontend/.next
+frontend/.env.local
+data
+mlruns
+.env
+.env.prod
+loadtest
+monitoring
