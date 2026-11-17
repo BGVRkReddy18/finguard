@@ -13,8 +13,8 @@ services:
     envVars:
       - key: DJANGO_DATABASE_URL  # Neon connection string (owner role), with ?sslmode=require
         sync: false
-      - key: FRONTEND_ORIGIN      # your Vercel URL, e.g. https://finguard-xyz.vercel.app
-        sync: false
+      - key: FRONTEND_ORIGIN      # the Vercel URL of the console (CORS allow-list)
+        value: https://finguard-swart.vercel.app
       - key: LLM_API_KEY          # free Groq key; leave empty for offline template reports
         sync: false
       - key: DJANGO_SECRET_KEY
