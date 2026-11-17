@@ -25,20 +25,13 @@ Secrets (`DJANGO_SECRET_KEY`, `READONLY_DB_PASSWORD`, `ADMIN_PASSWORD`) are gene
 When the deploy is live, note the URL, e.g. `https://finguard-api.onrender.com`, and check
 `https://finguard-api.onrender.com/api/health/` returns `{"status": "ok"}`.
 
-**3. Vercel (frontend, ~3 min)** — vercel.com → *Add New → Project* → import this repo →
-**Root Directory: `frontend`** → Environment Variables:
+**3. Vercel (frontend, ~3 min)** — put **your** Render URL in `frontend/.env.production` (committed;
+these are public values), push, then vercel.com → *Add New → Project* → import this repo →
+**Root Directory: `frontend`** → Deploy. No dashboard variables are needed — and if you add any, they
+override the file, so a wrong value there breaks login (the live demo hit exactly this once).
 
-| Name | Value |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | `https://finguard-api.onrender.com` |
-| `NEXT_PUBLIC_AI_URL` | `https://finguard-api.onrender.com/ai` |
-| `NEXT_PUBLIC_ML_URL` | `https://finguard-api.onrender.com/ml` |
-| `NEXT_PUBLIC_DEMO_ACCOUNTS` | `analyst,manager` |
-
-Deploy, then copy the production URL (e.g. `https://finguard-xyz.vercel.app`).
-
-**4. Connect them** — Render → *finguard-api → Environment* → set `FRONTEND_ORIGIN` to the Vercel URL
-(no trailing slash) → *Save* (Render redeploys).
+**4. Connect them** — set `FRONTEND_ORIGIN` in `render.yaml` to your Vercel URL (no trailing slash)
+and push; Render syncs the Blueprint and redeploys.
 
 **5. Keep it awake (~2 min)** — uptimerobot.com (email signup) → *New monitor* → HTTP(s) →
 `https://finguard-api.onrender.com/api/health/` → every **5 minutes**. Render's free tier sleeps after

@@ -276,3 +276,9 @@ def test_per_user_rate_limit_on_llm_endpoints(monkeypatch):
             assert int(blocked.headers["Retry-After"]) > 0
     finally:
         get_settings.cache_clear()
+
+
+def test_prompt_explains_feature_store_vs_database_history():
+    from app.agent import SYSTEM_PROMPT
+
+    assert "FULL history" in SYSTEM_PROMPT and "history_count" in SYSTEM_PROMPT

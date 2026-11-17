@@ -2,6 +2,11 @@
 
 [![CI](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml/badge.svg)](https://github.com/BGVRkReddy18/finguard/actions/workflows/ci.yml)
 
+### 🔴 Live demo: **[finguard-swart.vercel.app](https://finguard-swart.vercel.app)**
+Sign in as `analyst` / `finguard123` or `manager` / `finguard123`. Opening the dashboard starts a live
+transaction stream; flagged cases are investigated by the AI agent. *(Free hosting — the Cloud Lite
+edition below. If the API was redeployed recently it may take a minute to wake up.)*
+
 FinGuard scores card transactions for fraud in real time as they stream through Kafka, explains every
 decision, and routes suspicious ones to a case-management workflow for fraud analysts — with a full
 audit trail, the way banks require.
