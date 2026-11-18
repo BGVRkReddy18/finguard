@@ -282,3 +282,20 @@ def test_prompt_explains_feature_store_vs_database_history():
     from app.agent import SYSTEM_PROMPT
 
     assert "FULL history" in SYSTEM_PROMPT and "history_count" in SYSTEM_PROMPT
+
+
+def test_unexpected_error_returns_json_500_with_cors(monkeypatch):
+    """A crash must still be readable by the browser (CORS) instead of looking like 'unreachable'."""
+    from app.main import create_app
+
+    class ExplodingBackend(FakeBackend):
+        async def post_report(self, case_id, report):
+            raise RuntimeError("database went away")
+
+    app = create_app(db=FakeDB(), llm=None, backend=ExplodingBackend(), start_worker=False)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post("/investigate/7", headers={"Authorization": f"Bearer {make_token()}",
+                                                      "Origin": "http://localhost:3000"})
+        assert resp.status_code == 500
+        assert resp.json()["detail"].startswith("Internal error (RuntimeError)")
+        assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"

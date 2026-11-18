@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,36 @@ from .worker import BackendClient, run_auto_investigator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ai-service")
+
+
+class CatchUnhandled:
+    """Turn unexpected exceptions into a logged JSON 500 *inside* the CORS layer.
+
+    Starlette's default 500 is produced outside CORSMiddleware, so the browser can't read it and the
+    UI wrongly reports "backend unreachable". Only the exception's type is returned (no internals).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:
+            logger.exception("Unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            if started:
+                raise
+            body = {"detail": f"Internal error ({type(exc).__name__}). It has been logged."}
+            await JSONResponse(body, status_code=500)(scope, receive, send)
 
 
 class InvestigationResponse(BaseModel):
@@ -76,6 +107,7 @@ def create_app(db: Database | None = None, llm: LLMClient | None | object = _DEF
     ask_limit = UserRateLimiter(settings.user_ask_per_hour)
     investigate_limit = UserRateLimiter(settings.user_investigate_per_hour)
     app.mount("/metrics", make_asgi_app())
+    app.add_middleware(CatchUnhandled)  # added first = innermost, so CORS headers wrap its responses
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","),
                        allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 
