@@ -72,7 +72,7 @@ django.setup()
 from asgiref.sync import sync_to_async  # noqa: E402
 from django.core.asgi import get_asgi_application  # noqa: E402
 from django.core.management import call_command  # noqa: E402
-from django.db import connections  # noqa: E402
+from django.db import InterfaceError, OperationalError, connections  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
@@ -97,7 +97,26 @@ from mlapp.schemas import TransactionIn  # noqa: E402
 from mlapp.scoring import ScoringPipeline, load_scorer  # noqa: E402
 from transactions.services import ingest_scored_event  # noqa: E402
 
-orm = sync_to_async  # all ORM work runs on Django's single thread-sensitive executor
+
+def _reconnecting(fn, *args, **kwargs):
+    """Run an ORM call; if Neon dropped the connection while it slept, reconnect and retry once.
+
+    Django only refreshes connections around HTTP requests, but this process also does ORM work in
+    background tasks. Retrying is safe: ingestion is idempotent on txn_id.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except (OperationalError, InterfaceError):
+        log.warning("Database connection was closed (database likely resumed from sleep); reconnecting")
+        connections.close_all()
+        return fn(*args, **kwargs)
+
+
+def orm(fn, thread_sensitive: bool = True):
+    """All ORM work runs on Django's single thread-sensitive executor, with reconnect-on-failure."""
+    async def run(*args, **kwargs):
+        return await sync_to_async(_reconnecting, thread_sensitive=thread_sensitive)(fn, *args, **kwargs)
+    return run
 
 
 class AsyncInMemoryStore(InMemoryFeatureStore):

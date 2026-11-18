@@ -8,7 +8,10 @@ from psycopg_pool import AsyncConnectionPool
 class Database:
     def __init__(self, url: str, min_size: int = 1, max_idle: float = 600):
         # min_size=0 + short max_idle lets a serverless database (e.g. Neon) suspend between visits
+        # check: validate each connection before handing it out. Serverless Postgres (Neon) closes
+        # connections when it suspends; without this, the next query fails on a dead connection.
         self.pool = AsyncConnectionPool(url, min_size=min_size, max_size=5, max_idle=max_idle, open=False,
+                                        check=AsyncConnectionPool.check_connection,
                                         kwargs={"row_factory": dict_row})
 
     async def open(self) -> None:

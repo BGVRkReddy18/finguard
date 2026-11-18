@@ -81,6 +81,7 @@ if os.environ.get("DJANGO_DATABASE_URL"):
             "PASSWORD": unquote(_db.password or ""),
             # 0 = close after each request, so a serverless database can scale to zero when idle
             "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+            "CONN_HEALTH_CHECKS": True,  # re-check reused connections (serverless DBs drop them on suspend)
             "OPTIONS": dict(parse_qsl(_db.query)),  # e.g. sslmode=require
         }
     }
