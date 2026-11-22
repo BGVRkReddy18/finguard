@@ -102,6 +102,11 @@ class XGBoostScorer:
         self.version: str = meta["version"]
         self.threshold: float = meta["threshold"]
 
+    def probabilities(self, rows: list[list[float]]) -> list[float]:
+        """Batch scores without explanations, for replaying history cheaply."""
+        margins = self.booster.inplace_predict(np.asarray(rows, dtype=np.float32), predict_type="margin")
+        return [1.0 / (1.0 + math.exp(-float(margin))) for margin in margins]
+
     def score(self, txn: TransactionIn, f: dict[str, float]) -> tuple[float, list[str]]:
         row = np.asarray([vectorize(txn, f)], dtype=np.float32)
         # Fast path: in-place prediction (no DMatrix) for the ~97% of transactions that are clearly fine

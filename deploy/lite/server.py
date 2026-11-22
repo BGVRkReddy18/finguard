@@ -8,9 +8,9 @@ free tiers don't offer:
     Redis feature store -> in-memory feature store       (same feature code, warmed from history)
     3 services          -> 1 process: Django (ASGI) at /, AI FastAPI app at /ai, ML endpoints at /ml
 
-Cost-aware by design: transactions are generated only while someone has the dashboard open (plus a
-short grace period), and DB connections are closed when idle, so the serverless database can
-scale to zero between visits and the demo stays inside free quotas.
+Cost-aware by design: transactions are scored all the time, but saved (and turned into cases) only
+while someone has the dashboard open, plus a short grace period. Otherwise only in-memory chart
+totals are updated, so the serverless database can scale to zero and stay inside free quotas.
 """
 import asyncio
 import heapq
@@ -53,6 +53,9 @@ os.environ.setdefault("CORS_ORIGINS", FRONTEND)          # AI / ML FastAPI apps
 os.environ.setdefault("JWT_SECRET", os.environ["DJANGO_SECRET_KEY"])
 os.environ.setdefault("DATABASE_URL", _readonly_url(os.environ["DJANGO_DATABASE_URL"], os.environ["READONLY_DB_PASSWORD"]))
 os.environ.setdefault("KAFKA_ENABLED", "false")
+# One OpenMP thread, set before numpy/xgboost load. Otherwise every SHAP call wakes a thread per host core,
+# and their busy-waiting costs ~300x the real work, which a 0.1-CPU instance cannot afford.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 TPS = float(os.environ.get("SIM_TPS", 2))
 # Keep each customer's transaction rate equal to training (5 tx/s over 5,000 customers): scaling the
@@ -93,8 +96,10 @@ from cases.services import attach_ai_report  # noqa: E402
 from generator import make_customers, next_events  # noqa: E402
 from mlapp.config import get_settings as ml_settings  # noqa: E402
 from mlapp.features import InMemoryFeatureStore  # noqa: E402
+from mlapp.model import vectorize  # noqa: E402
 from mlapp.schemas import TransactionIn  # noqa: E402
-from mlapp.scoring import ScoringPipeline, load_scorer  # noqa: E402
+from mlapp.scoring import ScoringPipeline, load_scorer, risk_level  # noqa: E402
+from transactions import traffic  # noqa: E402
 from transactions.services import ingest_scored_event  # noqa: E402
 
 
@@ -146,6 +151,7 @@ def _close_db_connections() -> None:
 state: dict = {"simulator": "warming up", "warm": None, "scored": 0, "investigated": 0}
 store = AsyncInMemoryStore()
 pipeline = ScoringPipeline(store, load_scorer("auto", ml_settings().model_dir))
+history = traffic.TrafficHistory(pipeline.scorer.version)
 broadcaster = Broadcaster()
 raw_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=2000)
 case_queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue(maxsize=20)
@@ -183,16 +189,35 @@ def _warm_feature_store() -> int:
     end = datetime.now(UTC)
     clock, step = end - timedelta(hours=WARM_HOURS), timedelta(seconds=1 / TPS)
     pending, counter, n = [], itertools.count(), 0
+    batch: list[tuple[TransactionIn, dict]] = []
     while clock < end:
         for delay, txn in next_events(customers, rng, clock, FRAUD_RATE):
             heapq.heappush(pending, (clock + timedelta(seconds=delay), next(counter), txn))
         while pending and pending[0][0] <= clock:
             due, _, txn = heapq.heappop(pending)
             txn["timestamp"] = due
-            InMemoryFeatureStore.compute_and_update(store, TransactionIn.model_validate(txn))
+            parsed = TransactionIn.model_validate(txn)
+            batch.append((parsed, InMemoryFeatureStore.compute_and_update(store, parsed)))
             n += 1
+        if len(batch) >= 2048:
+            _record_history(batch)
+            batch.clear()
         clock += step
+    if batch:
+        _record_history(batch)
     return n
+
+
+def _record_history(batch: list[tuple[TransactionIn, dict]]) -> None:
+    """Score replayed traffic in bulk, so the charts are already full right after a restart."""
+    scorer = pipeline.scorer
+    if hasattr(scorer, "probabilities"):
+        scores = scorer.probabilities([vectorize(t, f) for t, f in batch])
+    else:
+        scores = [scorer.score(t, f)[0] for t, f in batch]
+    for (txn, _), score in zip(batch, scores, strict=True):
+        history.record(txn.timestamp, amount=txn.amount, city=txn.city, score=score,
+                       risk=risk_level(score, pipeline.flag_threshold), flagged=score >= pipeline.flag_threshold)
 
 
 async def warm() -> None:
@@ -200,28 +225,27 @@ async def warm() -> None:
     n = await asyncio.to_thread(_warm_feature_store)
     state["warm"] = f"{n:,} transactions in {time.monotonic() - start:.0f}s"
     log.info("Feature store warmed: %s (%d customers)", state["warm"], CUSTOMERS)
+    traffic.current = history  # until now the dashboard reads the database
     warmed.set()
 
 
 async def simulator() -> None:
-    """Streams transactions only while someone is watching (+ grace), so idle demos cost nothing."""
+    """Streams all the time; ``state`` says whether they are saved (someone watching, + grace) or not."""
     await warmed.wait()
     customers, rng = make_customers(CUSTOMERS, 42), random.Random()
     pending: list = []
     counter = itertools.count()
-    last_viewer = 0.0
+    last_viewer = float("-inf")  # monotonic() can be below the grace period right after a host boot
     while True:
         now = time.monotonic()
         if broadcaster.queues:
             last_viewer = now
         if now - last_viewer > IDLE_GRACE_S:
-            if state["simulator"] != "paused":
-                state["simulator"] = "paused"
+            if state["simulator"] != "background":
+                state["simulator"] = "background"
                 await orm(_close_db_connections, thread_sensitive=True)()  # let Neon scale to zero
-                log.info("No viewers: simulator paused")
-            await asyncio.sleep(2)
-            continue
-        if state["simulator"] != "running":
+                log.info("No viewers: scoring in the background, not saving")
+        elif state["simulator"] != "running":
             state["simulator"] = "running"
             log.info("Viewer connected: simulator running at %.1f tx/s", TPS)
         for delay, txn in next_events(customers, rng, datetime.now(UTC), FRAUD_RATE):
@@ -239,11 +263,16 @@ async def scorer() -> None:
     while True:
         event = await raw_queue.get()
         try:
-            result = await pipeline.score(TransactionIn.model_validate(event))
+            parsed = TransactionIn.model_validate(event)
+            result = await pipeline.score(parsed)
+            history.record(parsed.timestamp, amount=parsed.amount, city=parsed.city, score=result.fraud_score,
+                           risk=result.risk_level, flagged=result.is_flagged, latency_ms=result.latency_ms)
+            state["scored"] += 1
+            if state["simulator"] != "running":
+                continue  # nobody watching: no database work, no cases, no LLM tokens
             scored = {**event, "score": result.model_dump()}
             broadcaster.publish(slim_transaction(scored))
             txn, created = await orm(ingest_scored_event, thread_sensitive=True)(scored)
-            state["scored"] += 1
             if created and txn.is_flagged:
                 case = await orm(FraudCase.objects.get, thread_sensitive=True)(transaction=txn)
                 broadcaster.publish({"type": "case_opened", "case_id": case.id, "priority": case.priority,

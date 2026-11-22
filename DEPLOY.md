@@ -40,9 +40,10 @@ and push; Render syncs the Blueprint and redeploys.
 The admin password is in Render → Environment → `ADMIN_PASSWORD`. Every push to `main` redeploys
 both Render and Vercel automatically.
 
-**How the lite edition behaves:** the simulator streams only while someone has the dashboard open
-(plus 2 minutes), so the first visitor sees the live feed start within a second or two; cases and
-AI reports accumulate in Neon across visits. After a redeploy the API needs ~1–2 minutes on the free
+**How the lite edition behaves:** simulated payments are scored around the clock, and the dashboard's
+24 h totals and charts are kept in memory (rebuilt from simulated history after a restart).
+Transactions, cases and AI reports are saved to Neon only while someone has the dashboard open
+(plus 2 minutes), so "Ask AI" and the case queue cover watched periods only. After a redeploy the API needs ~1–2 minutes on the free
 CPU before it answers; the UI shows a "waking up" message meanwhile.
 
 ## Option B — Hugging Face Spaces (all-in-one container)

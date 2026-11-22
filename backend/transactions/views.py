@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from cases.models import FraudCase
 
+from . import traffic
 from .models import Transaction
 from .serializers import TransactionSerializer
 
@@ -33,6 +34,16 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
     def stats(self, request):
         """Dashboard KPIs for the last N hours (default 24)."""
         hours = int_param(request, "hours", 24, 1, 24 * 30)
+        history = traffic.current
+        if history and hours <= traffic.MAX_HOURS:
+            totals = history.stats(timezone.now(), hours)
+            return Response({
+                "window_hours": hours,
+                **totals,
+                "flag_rate": totals["flagged"] / totals["total"] if totals["total"] else 0.0,
+                "cases_by_status": dict(FraudCase.objects.values_list("status").annotate(n=Count("id"))),
+                "background_traffic": True,
+            })
         since = timezone.now() - timedelta(hours=hours)
         qs = Transaction.objects.filter(timestamp__gte=since)
 
@@ -72,7 +83,8 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
         now = timezone.now()
         start = int((now - timedelta(hours=hours)).timestamp()) // bucket_s * bucket_s
 
-        per_minute = (
+        history = traffic.current
+        per_minute = history.per_minute(start) if history and hours <= traffic.MAX_HOURS else (
             Transaction.objects.filter(timestamp__gte=datetime.fromtimestamp(start, tz=dt_timezone.utc))
             .annotate(minute=TruncMinute("timestamp"))
             .values("minute")

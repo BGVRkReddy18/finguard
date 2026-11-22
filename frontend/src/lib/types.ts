@@ -74,6 +74,7 @@ export interface Stats {
   top_flagged_cities: { city: string; n: number }[];
   cases_by_status: Partial<Record<CaseStatus, number>>;
   model_version: string | null;
+  background_traffic?: boolean; // Cloud Lite: totals include traffic that was not saved
 }
 
 export interface Timeseries {

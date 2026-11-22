@@ -157,9 +157,9 @@ steady-load row is the operating latency. Workers scale throughput because all s
 **Deployment targets** (guide in [DEPLOY.md](DEPLOY.md)):
 - **Cloud Lite (live demo; free, no card): Vercel + Render + Neon.** The same application code in one
   ASGI process (`deploy/lite/server.py`): Django at `/`, the AI FastAPI app at `/ai`, ML endpoints at
-  `/ml`; Kafka → in-process asyncio queues, Redis → in-memory feature store. Runs in **~120 MB** on
-  Render's free 0.1-CPU instance. **Cost-aware:** transactions stream only while someone has the
-  dashboard open; when idle the app pauses the simulator and closes every DB connection so Neon
+  `/ml`; Kafka → in-process asyncio queues, Redis → in-memory feature store. Runs in **under 200 MB** on
+  Render's free 0.1-CPU instance. **Cost-aware:** transactions are saved only while someone has the
+  dashboard open; when idle the app keeps just in-memory chart totals and closes DB connections so Neon
   scales to zero, while a 5-minute keep-alive ping (which never touches the DB) keeps the API warm.
   Customer count scales with traffic rate so per-customer behaviour — and model quality (precision
   0.78 / recall 0.60 vs 0.79 / 0.62 at training settings) — is preserved.

@@ -28,7 +28,9 @@ export default function OverviewPage() {
 
   return (
     <>
-      <PageHeader title="Overview" subtitle="Last 24 hours · card transactions scored in real time" />
+      <PageHeader title="Overview" subtitle={s?.background_traffic
+        ? "Last 24 hours · simulated payments, scored around the clock · cases are created while the demo is open"
+        : "Last 24 hours · card transactions scored in real time"} />
       {stats.error && <div className="mb-4"><ErrorNote message={stats.error} /></div>}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
