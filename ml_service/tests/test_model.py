@@ -2,6 +2,7 @@ import json
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -112,4 +113,12 @@ def test_reason_wording_depends_on_value_direction():
     (0.30, 0.35, "LOW"), (0.40, 0.35, "MEDIUM"), (0.90, 0.35, "HIGH"), (0.90, 0.95, "LOW"),
 ])
 def test_risk_levels_follow_threshold(score, threshold, expected):
-    assert risk_level(score, threshold) == expected
+    assert risk_level(score, threshold, high_risk=0.85) == expected
+
+
+def test_shipped_model_has_room_for_all_three_bands():
+    scorer = XGBoostScorer(Path(__file__).parents[1] / "artifacts")
+    assert scorer.threshold < scorer.high_risk < 1, "MEDIUM is empty: re-pick high_risk on validation data"
+    middle = (scorer.threshold + scorer.high_risk) / 2
+    levels = [risk_level(s, scorer.threshold, scorer.high_risk) for s in (0.5, middle, scorer.high_risk)]
+    assert levels == ["LOW", "MEDIUM", "HIGH"]

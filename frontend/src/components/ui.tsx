@@ -117,8 +117,8 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 }
 
 /** Score as a thin meter + number. */
-export function ScoreBar({ score, threshold }: { score: number; threshold?: number }) {
-  const tone = score >= 0.85 ? "bg-critical" : threshold != null && score >= threshold ? "bg-warning" : "bg-ink-3";
+export function ScoreBar({ score, level }: { score: number; level: RiskLevel }) {
+  const tone = level === "HIGH" ? "bg-critical" : level === "MEDIUM" ? "bg-warning" : "bg-ink-3";
   return (
     <div className="flex items-center gap-2">
       <div className="relative h-1.5 w-16 overflow-hidden rounded-full bg-surface-2" aria-hidden>

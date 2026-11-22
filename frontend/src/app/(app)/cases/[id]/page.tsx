@@ -116,7 +116,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
               <div className="text-right">
                 <div className="text-xs text-ink-3">Fraud score</div>
-                <div className="flex items-center gap-2"><ScoreBar score={t.fraud_score} /><RiskBadge level={t.risk_level} /></div>
+                <div className="flex items-center gap-2"><ScoreBar score={t.fraud_score} level={t.risk_level} /><RiskBadge level={t.risk_level} /></div>
                 <div className="mt-1 text-[11px] text-ink-3">{t.model_version} · {t.scoring_latency_ms?.toFixed(1)} ms</div>
               </div>
             </div>

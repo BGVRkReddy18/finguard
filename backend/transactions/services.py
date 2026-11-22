@@ -13,8 +13,6 @@ from .models import Customer, Transaction
 
 logger = logging.getLogger(__name__)
 
-HIGH_PRIORITY_SCORE = 0.85
-
 
 @db_transaction.atomic
 def ingest_scored_event(event: dict) -> tuple[Transaction, bool]:
@@ -57,7 +55,7 @@ def ingest_scored_event(event: dict) -> tuple[Transaction, bool]:
 
     if txn.is_flagged:
         priority = (
-            FraudCase.Priority.HIGH if txn.fraud_score >= HIGH_PRIORITY_SCORE else FraudCase.Priority.MEDIUM
+            FraudCase.Priority.HIGH if txn.risk_level == txn.RiskLevel.HIGH else FraudCase.Priority.MEDIUM
         )
         case = FraudCase.objects.create(transaction=txn, priority=priority)
         log_action(None, "case.opened", case, {"fraud_score": txn.fraud_score, "reasons": txn.reasons})

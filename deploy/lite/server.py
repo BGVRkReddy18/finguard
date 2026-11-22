@@ -217,7 +217,8 @@ def _record_history(batch: list[tuple[TransactionIn, dict]]) -> None:
         scores = [scorer.score(t, f)[0] for t, f in batch]
     for (txn, _), score in zip(batch, scores, strict=True):
         history.record(txn.timestamp, amount=txn.amount, city=txn.city, score=score,
-                       risk=risk_level(score, pipeline.flag_threshold), flagged=score >= pipeline.flag_threshold)
+                       risk=risk_level(score, pipeline.flag_threshold, scorer.high_risk),
+                       flagged=score >= pipeline.flag_threshold)
 
 
 async def warm() -> None:

@@ -89,6 +89,9 @@ def _reason(feature: str, txn: TransactionIn, f: dict[str, float]) -> str | None
 class XGBoostScorer:
     MIN_CONTRIBUTION = 0.3  # log-odds; smaller pushes are noise to an analyst
     MAX_REASONS = 4
+    # Lowest cut-off tested with >=90% precision on validation data. Must stay above the flag threshold
+    # or MEDIUM can never happen: re-check after retraining (a test enforces it).
+    high_risk = 0.98
     EXPLAIN_FLOOR = 0.2  # SHAP only for transactions risky enough for an analyst to look at
 
     def __init__(self, artifact_dir: Path):

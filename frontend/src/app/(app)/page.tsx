@@ -62,7 +62,11 @@ export default function OverviewPage() {
               </div>
             ))}
           </dl>
-          <p className="mt-2 text-xs text-ink-3">Medium and High risk open cases for analysts.</p>
+          <p className="mt-2 text-xs text-ink-3">
+            {s?.background_traffic
+              ? "Medium and High are alerts. They become cases while the demo is open."
+              : "Medium and High risk open cases for analysts."}
+          </p>
         </Card>
       </div>
 
@@ -99,7 +103,7 @@ export default function OverviewPage() {
                   <td className="py-1.5 text-ink-2">{t.city}</td>
                   <td className="py-1.5 text-ink-2">{t.channel}</td>
                   <td className="py-1.5 text-right tabular-nums text-ink">{formatINR(t.amount)}</td>
-                  <td className="py-1.5 pl-4"><ScoreBar score={t.fraud_score} /></td>
+                  <td className="py-1.5 pl-4"><ScoreBar score={t.fraud_score} level={t.risk_level} /></td>
                   <td className="py-1.5" title={t.reasons.join(" · ")}><RiskBadge level={t.risk_level} /></td>
                 </tr>
               ))}

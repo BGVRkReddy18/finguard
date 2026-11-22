@@ -84,7 +84,7 @@ export default function CasesPage() {
                   <td className="py-2 font-mono text-xs text-ink-2">{c.transaction.customer_id}</td>
                   <td className="py-2 text-ink">{c.transaction.merchant}<div className="text-xs text-ink-3">{c.transaction.city} · {c.transaction.channel}</div></td>
                   <td className="py-2 text-right tabular-nums text-ink">{formatINR(c.transaction.amount)}</td>
-                  <td className="py-2"><ScoreBar score={c.transaction.fraud_score} /></td>
+                  <td className="py-2"><ScoreBar score={c.transaction.fraud_score} level={c.transaction.risk_level} /></td>
                   <td className="py-2"><Badge tone={c.priority === "HIGH" ? "critical" : "warning"}>{c.priority === "HIGH" ? "High" : "Medium"}</Badge></td>
                   <td className="py-2"><StatusBadge status={c.status} /></td>
                   <td className="py-2"><RecommendationBadge rec={c.ai_recommendation} confidence={c.ai_confidence} /></td>

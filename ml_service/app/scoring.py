@@ -28,6 +28,7 @@ HIGH_RISK_ONLINE_CATEGORIES = {"electronics", "jewellery", "gift_cards", "travel
 class Scorer(Protocol):
     version: str
     threshold: float  # score at/above which a transaction is flagged
+    high_risk: float  # score at/above which a flagged transaction is HIGH rather than MEDIUM
 
     def score(self, txn: TransactionIn, features: dict[str, float]) -> tuple[float, list[str]]: ...
 
@@ -37,6 +38,7 @@ class RuleBasedScorer:
 
     version = "rules-v1"
     threshold = 0.7
+    high_risk = 0.85
     BIAS = -4.0
 
     def score(self, txn: TransactionIn, f: dict[str, float]) -> tuple[float, list[str]]:
@@ -76,12 +78,9 @@ class RuleBasedScorer:
         return probability, reasons
 
 
-HIGH_RISK_SCORE = 0.85
-
-
-def risk_level(score: float, threshold: float) -> str:
+def risk_level(score: float, threshold: float, high_risk: float) -> str:
     """Risk bands are tied to the flag threshold, so every flagged transaction is MEDIUM or HIGH."""
-    if score >= max(HIGH_RISK_SCORE, threshold):
+    if score >= max(high_risk, threshold):
         return "HIGH"
     if score >= threshold:
         return "MEDIUM"
@@ -112,7 +111,7 @@ class ScoringPipeline:
         probability, reasons = self.scorer.score(txn, features)
         elapsed = time.perf_counter() - start
 
-        level = risk_level(probability, self.flag_threshold)
+        level = risk_level(probability, self.flag_threshold, self.scorer.high_risk)
         SCORE_LATENCY.observe(elapsed)
         SCORED_TOTAL.labels(risk_level=level).inc()
         return ScoreResult(

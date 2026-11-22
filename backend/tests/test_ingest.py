@@ -22,6 +22,11 @@ def test_flagged_transaction_opens_case_and_audit_entry(make_event):
     assert AuditLog.objects.filter(action="case.opened", entity_id=str(case.pk)).exists()
 
 
+def test_priority_follows_the_scorers_risk_level(make_event):
+    txn, _ = ingest_scored_event(make_event(score=0.95, flagged=True, risk="MEDIUM"))
+    assert FraudCase.objects.get(transaction=txn).priority == FraudCase.Priority.MEDIUM
+
+
 def test_ingest_is_idempotent(make_event):
     event = make_event(score=0.75, flagged=True, risk="MEDIUM")
     ingest_scored_event(event)
