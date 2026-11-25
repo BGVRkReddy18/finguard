@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge, Button, Card, Empty, ErrorNote, PageHeader, RecommendationBadge, ScoreBar, Spinner, StatusBadge, cx } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -11,30 +11,46 @@ import { useLiveRefresh, useSession } from "@/lib/session";
 import type { CaseStatus, FraudCase, Paginated } from "@/lib/types";
 import { useFetch } from "@/lib/useFetch";
 
-const TABS: { label: string; status: CaseStatus | "" }[] = [
-  { label: "Open", status: "OPEN" },
-  { label: "Investigating", status: "INVESTIGATING" },
-  { label: "Confirmed fraud", status: "CONFIRMED_FRAUD" },
-  { label: "False positive", status: "FALSE_POSITIVE" },
-  { label: "All", status: "" },
+type View = CaseStatus | "ALL" | "MINE";
+
+const TABS: { label: string; view: View }[] = [
+  { label: "Open", view: "OPEN" },
+  { label: "Investigating", view: "INVESTIGATING" },
+  { label: "Confirmed fraud", view: "CONFIRMED_FRAUD" },
+  { label: "False positive", view: "FALSE_POSITIVE" },
+  { label: "All", view: "ALL" },
 ];
+// Analysts start here. It spans every status, so a case doesn't vanish when it is assigned or resolved.
+const MY_CASES: { label: string; view: View } = { label: "My cases", view: "MINE" };
+// Assignments have no live event. 15 s stays well inside the API limit (1,000/hour per shared demo user).
+const REFRESH_MS = 15_000;
 
 export default function CasesPage() {
-  const { user } = useSession();
+  const { user, isManager } = useSession();
   const router = useRouter();
-  const [status, setStatus] = useState<CaseStatus | "">("OPEN");
+  const [view, setView] = useState<View>(isManager ? "OPEN" : "MINE");
   const [priority, setPriority] = useState("");
   const [mine, setMine] = useState(false);
   const [page, setPage] = useState(1);
 
   const params = new URLSearchParams({ ordering: "-created_at", page: String(page) });
-  if (status) params.set("status", status);
+  if (view !== "MINE" && view !== "ALL") params.set("status", view);
   if (priority) params.set("priority", priority);
-  if (mine && user) params.set("assigned_to", String(user.id));
+  if ((mine || view === "MINE") && user) params.set("assigned_to", String(user.id));
   const query = params.toString();
 
   const cases = useFetch(() => api<Paginated<FraudCase>>("core", `/api/cases/?${query}`), [query]);
   useLiveRefresh(["case_opened", "ai_report"], () => page === 1 && cases.reload(), 2000);
+  const { reload } = cases;
+  useEffect(() => {
+    const refresh = () => document.visibilityState === "visible" && reload();
+    const id = setInterval(refresh, REFRESH_MS);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [reload]);
 
   const pages = cases.data ? Math.max(1, Math.ceil(cases.data.count / 25)) : 1;
   const select = (fn: () => void) => { fn(); setPage(1); };
@@ -45,9 +61,9 @@ export default function CasesPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1" role="tablist">
-          {TABS.map((t) => (
-            <button key={t.label} role="tab" aria-selected={status === t.status} onClick={() => select(() => setStatus(t.status))}
-              className={cx("rounded-md px-3 py-1 text-sm", status === t.status ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:text-ink")}>
+          {(isManager ? TABS : [MY_CASES, ...TABS]).map((t) => (
+            <button key={t.view} role="tab" aria-selected={view === t.view} onClick={() => select(() => setView(t.view))}
+              className={cx("rounded-md px-3 py-1 text-sm", view === t.view ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:text-ink")}>
               {t.label}
             </button>
           ))}
@@ -58,10 +74,12 @@ export default function CasesPage() {
           <option value="HIGH">High priority</option>
           <option value="MEDIUM">Medium priority</option>
         </select>
-        <label className="flex items-center gap-2 text-sm text-ink-2">
-          <input type="checkbox" checked={mine} onChange={(e) => select(() => setMine(e.target.checked))} />
-          Assigned to me
-        </label>
+        {view !== "MINE" && (
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input type="checkbox" checked={mine} onChange={(e) => select(() => setMine(e.target.checked))} />
+            Assigned to me
+          </label>
+        )}
         <span className="ml-auto text-xs text-ink-3">{cases.data ? `${cases.data.count.toLocaleString("en-IN")} cases` : ""}</span>
       </div>
 
@@ -94,7 +112,11 @@ export default function CasesPage() {
             </tbody>
           </table>
           {cases.loading && !cases.data && <div className="py-10 text-center text-ink-3"><Spinner /></div>}
-          {cases.data && !cases.data.results.length && <Empty>No cases here. Nice.</Empty>}
+          {cases.data && !cases.data.results.length && <Empty>
+            {view === "MINE" && !priority
+              ? "No cases assigned to you yet. New assignments appear here automatically, or pick one from Open."
+              : "No cases here. Nice."}
+          </Empty>}
         </div>
         {pages > 1 && (
           <div className="mt-3 flex items-center justify-end gap-2 text-sm text-ink-2">

@@ -9,20 +9,25 @@ export function useFetch<T>(loader: () => Promise<T>, deps: unknown[], pollMs?: 
   const [loading, setLoading] = useState(true);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const generation = useRef(0); // bumped when deps change, so a slow answer for old deps is ignored
 
   const reload = useCallback(async () => {
+    const started = generation.current;
+    const current = () => started === generation.current;
     try {
       const result = await loaderRef.current();
+      if (!current()) return;
       setData(result);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      if (current()) setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    generation.current++;
     setLoading(true);
     reload();
     if (!pollMs) return;
